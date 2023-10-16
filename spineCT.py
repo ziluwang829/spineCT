@@ -27,8 +27,26 @@ class UninteractiveScrollArea(QScrollArea):
 
 
 class Shape():
-    def __init__(self, ndarray):
+    # color could be 0: Red, 1: Green, 2: Blue, 3: Yellow
+    def __init__(self, ndarray, color):
         self.ndarray = ndarray
+        self.color = color
+
+    # color could be 0: Red, 1: Green, 2: Blue, 3: Yellow
+    def change_color(self, color):
+        self.color = color
+
+
+    def draw_on_array(self, ndarray):
+        pass
+
+
+    def on(self, x, y):
+        pass
+
+
+    def info(self):
+        pass
 
 
 
@@ -68,7 +86,7 @@ class DisplayWidget(QWidget):
         self.info = QWidget()
         self.info.setFixedSize(QSize(200, 200))
         self.info.move(50, 50)
-        self.info.setStyleSheet("background : transparent; color: red;")
+        self.info.setStyleSheet("background : transparent; color: red; border: 1px double red")
 
         self.info_label = QLabel(self.info)
         self.info.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -81,10 +99,10 @@ class DisplayWidget(QWidget):
         # Set stacking layout and add screen and board
         self.layout = QStackedLayout(self)
         self.layout.setStackingMode(QStackedLayout.StackingMode.StackAll)
+        self.layout.addWidget(self.info)
         self.layout.addWidget(self.board)
         self.layout.addWidget(self.screen_)
 
-        
         # No data available for now
         self.current_control = None
         self.current_image = None
@@ -92,6 +110,7 @@ class DisplayWidget(QWidget):
         self.zoom_factors = None
         self.drawn_shapes = None
         self.save_draw = None
+
 
     def update_images(self, ct_img):
         if ct_img is None or len(ct_img) <= 0:
@@ -106,11 +125,13 @@ class DisplayWidget(QWidget):
         # of drawn shapes. 
         self.drawn_shapes = {}
         # Redraw first image
-        self.display_images(self.current_image[0], self.current_image[1])
+        self.refresh_image()
+        # A reference to a Shape object that will be saved
         self.save_draw = None
 
 
-    def display_images(self, folder_index, image_index, drawn = True):
+    # TODO
+    def display_image(self, folder_index, image_index, drawn = True):
         if self.all_images is not None:
             # Set current
             self.current_image = (folder_index, image_index)
@@ -142,23 +163,32 @@ class DisplayWidget(QWidget):
             q_image = QImage(rgb_image.tobytes(), w, h, 3 * w, QImage.Format.Format_RGB888)
             pixmap = QPixmap.fromImage(q_image)
             self.screen_label.setPixmap(pixmap)
+        
+        
+    def refresh_image(self):
+        self.display_image(self.current_image[0], self.current_image[1])
+
+
+    def display_info(self, position):
+        pass
 
 
     def change_control(self, control):
         self.current_control = control
-        if self.current_control == 5:
-            if self.current_image is not None and self.current_image in self.drawn_shapes.keys():
+        if self.current_control == 5 and self.current_image is not None:
+            if self.current_image in self.drawn_shapes.keys():
                 self.drawn_shapes.pop(self.current_image)
-                self.display_images(self.current_image[0], self.current_image[1])
+                self.refresh_image()
+
 
     def wheelEvent(self, event):
         modifiers = QApplication.keyboardModifiers()
         if modifiers == Qt.KeyboardModifier.ShiftModifier:
             delta = event.angleDelta().x()
-            z = self.zoom_factors[self.current_image[0]][self.current_image[1]]
-            self.zoom_factors[self.current_image[0]][self.current_image[1]] = \
-                np.clip(z + np.sign(delta) * 0.05, 1, 3)
-            self.display_images(self.current_image[0], self.current_image[1])
+            i, j = self.current_image
+            z = self.zoom_factors[i][j]
+            self.zoom_factors[i][j] = np.clip(z + np.sign(delta) * 0.05, 1, 3)
+            self.refresh_image()
         else:
             event.ignore()
 
@@ -166,12 +196,13 @@ class DisplayWidget(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and self.current_control is not None:
             self.start_pos = event.position()
-            if self.current_control in [2, 3, 4]:
-                self.dragging = True
-            elif self.current_control == 0:
-                pass
+            if self.current_control == 0:
+                self.display_info(event.position())
             elif self.current_control == 1:
-                pass
+                self.dragging = True
+            elif self.current_control in [2, 3, 4]:
+                self.dragging = True
+
 
 
 
@@ -227,12 +258,12 @@ class DisplayWidget(QWidget):
                     drawn.append(drawing)
                     self.drawn_shapes[self.current_image] = drawn
                 self.board_label.setPixmap(QPixmap()) 
-                self.display_images(self.current_image[0], self.current_image[1])
+                self.refresh_image()
 
 
     def resizeEvent(self, event):
         if self.all_images is not None:
-            self.display_images(self.current_image[0], self.current_image[1])
+            self.refresh_images()
 
 
 
@@ -452,7 +483,7 @@ class MainWindow(QMainWindow):
 
     def change_display(self):
         # Calls a function in DisplayWidget to change the display
-        self.display_screen.display_images(self.select_current, self.display_scrollbar.value())
+        self.display_screen.display_image(self.select_current, self.display_scrollbar.value())
 
 
     def keyPressEvent(self, event):
