@@ -1,392 +1,486 @@
-import typing
-from PyQt6 import QtGui
 from PyQt6.QtWidgets import QApplication, QMainWindow, QPushButton, \
-    QWidget, QGridLayout, QLineEdit, QFileDialog, QFormLayout, QLabel, \
-    QLCDNumber, QMessageBox, QHBoxLayout, QComboBox, QRadioButton, QCheckBox, QVBoxLayout, QScrollArea, QScrollBar
-from PyQt6.QtCore import pyqtSignal, QObject, QSize, QRunnable, pyqtSlot, QThreadPool, Qt
+    QWidget, QGridLayout, QFileDialog, QHBoxLayout, QVBoxLayout, \
+    QScrollArea, QScrollBar, QLabel, QSizePolicy, QStackedLayout
+from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtGui import QAction, QPixmap, QIcon, QImage
-from PyQt6.QtGui import QPalette, QColor
-import numpy as np
-import sys
-import pdb
-import os
 import pydicom as dicom
+import numpy as np
 import cv2
+import sys
+import os
+from pdb import set_trace
 
 
-class MyScrollArea(QScrollArea):
+
+class UninteractiveScrollArea(QScrollArea):
     def __init__(self):
         super().__init__()
 
+
     def keyPressEvent(self, event):
-        # Ignore key events to disable keyboard interaction
         event.ignore()
+
 
     def wheelEvent(self, event):
         event.ignore()
+
+
+
+class Shape():
+    def __init__(self, ndarray):
+        self.ndarray = ndarray
+
+
+
+class DisplayWidget(QWidget):
+    def __init__(self, *args, **kwargs):
+        super(DisplayWidget, self).__init__(*args, **kwargs)
+
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding) 
+
+        # Set screen and screen label
+        self.screen_ = QWidget()
+        self.screen_.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.screen_.setStyleSheet("background : transparent;")
+
+        self.screen_label = QLabel(self.screen_)
+        self.screen_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.screen_layout = QHBoxLayout(self.screen_)
+        self.screen_layout.addWidget(self.screen_label)
+        self.screen_layout.setContentsMargins(0, 0, 0, 0)
+        self.screen_layout.setSpacing(0)
+
+        # Set drawing board and drawing board label
+        self.board = QWidget()
+        self.board.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.board.setStyleSheet("background : transparent;")
+
+        self.board_label = QLabel(self.board)
+        self.board_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.board_layout = QHBoxLayout(self.board)
+        self.board_layout.addWidget(self.board_label)
+        self.board_layout.setContentsMargins(0, 0, 0, 0)
+        self.board_layout.setSpacing(0)
+
+        # Set info panel
+        self.info = QWidget()
+        self.info.setFixedSize(QSize(200, 200))
+        self.info.move(50, 50)
+        self.info.setStyleSheet("background : transparent; color: red;")
+
+        self.info_label = QLabel(self.info)
+        self.info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.info_layout = QHBoxLayout(self.info)
+        self.info_layout.addWidget(self.info_label)
+        self.info_layout.setContentsMargins(0, 0, 0, 0)
+        self.info_layout.setSpacing(0)
+
+        # Set stacking layout and add screen and board
+        self.layout = QStackedLayout(self)
+        self.layout.setStackingMode(QStackedLayout.StackingMode.StackAll)
+        self.layout.addWidget(self.board)
+        self.layout.addWidget(self.screen_)
+
+        
+        # No data available for now
+        self.current_control = None
+        self.current_image = None
+        self.all_images = None
+        self.zoom_factors = None
+        self.drawn_shapes = None
+        self.save_draw = None
+
+    def update_images(self, ct_img):
+        if ct_img is None or len(ct_img) <= 0:
+            return
+        # Set current displayed image
+        self.current_image = (0, 0)
+        # Set all ct images
+        self.all_images = ct_img
+        # Set all zoom factors
+        self.zoom_factors = [[1 for ct in ct_group] for ct_group in ct_img]
+        # Set empty dict, key is (int, int) to get a list 
+        # of drawn shapes. 
+        self.drawn_shapes = {}
+        # Redraw first image
+        self.display_images(self.current_image[0], self.current_image[1])
+        self.save_draw = None
+
+
+    def display_images(self, folder_index, image_index, drawn = True):
+        if self.all_images is not None:
+            # Set current
+            self.current_image = (folder_index, image_index)
+
+            # convert image from gray to rbg
+            img = self.all_images[folder_index][image_index]
+            rgb_image = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+
+            # Get zoom factor, height, and width
+            z = self.zoom_factors[self.current_image[0]][self.current_image[1]]
+            h, w, _ = rgb_image.shape
+
+            if self.current_image in self.drawn_shapes.keys() and self.drawn_shapes[self.current_image] is not None:
+                drawn = self.drawn_shapes[self.current_image]
+                for d in drawn:
+                    rgb_image[np.where(d > 0)] = np.array([0, 0, 255])
+
+            if z != 1:
+                rgb_image = cv2.resize(rgb_image, (int(w * z), int(h * z)))
+
+                w = min(rgb_image.shape[1], self.size().width())
+                h = min(rgb_image.shape[0], self.size().height())
+
+                rgb_image = rgb_image[rgb_image.shape[0] // 2 - h // 2 : rgb_image.shape[0] // 2 + h // 2, \
+                              rgb_image.shape[1] // 2 - w // 2 : rgb_image.shape[1] // 2 + w // 2]
+                
+                h, w, _ = rgb_image.shape
+
+            q_image = QImage(rgb_image.tobytes(), w, h, 3 * w, QImage.Format.Format_RGB888)
+            pixmap = QPixmap.fromImage(q_image)
+            self.screen_label.setPixmap(pixmap)
+
+
+    def change_control(self, control):
+        self.current_control = control
+        if self.current_control == 5:
+            if self.current_image is not None and self.current_image in self.drawn_shapes.keys():
+                self.drawn_shapes.pop(self.current_image)
+                self.display_images(self.current_image[0], self.current_image[1])
+
+    def wheelEvent(self, event):
+        modifiers = QApplication.keyboardModifiers()
+        if modifiers == Qt.KeyboardModifier.ShiftModifier:
+            delta = event.angleDelta().x()
+            z = self.zoom_factors[self.current_image[0]][self.current_image[1]]
+            self.zoom_factors[self.current_image[0]][self.current_image[1]] = \
+                np.clip(z + np.sign(delta) * 0.05, 1, 3)
+            self.display_images(self.current_image[0], self.current_image[1])
+        else:
+            event.ignore()
+
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self.current_control is not None:
+            self.start_pos = event.position()
+            if self.current_control in [2, 3, 4]:
+                self.dragging = True
+            elif self.current_control == 0:
+                pass
+            elif self.current_control == 1:
+                pass
+
+
+
+
+    def mouseMoveEvent(self, event):
+        if self.current_control is not None and self.current_control in [2, 3, 4] and self.dragging:
+            w = self.size().width()
+            h = self.size().height()
+
+            p0 = (int(self.start_pos.x()), int(self.start_pos.y()))
+            p1 = (int(event.position().x()), int(event.position().y()))
+            draw = np.zeros((h, w, 3)).astype(np.uint8)
+            if self.current_control == 2:
+                draw = cv2.line(draw, p0, p1, (0, 255, 0), thickness = 1)
+            elif self.current_control == 3:
+                p0_np = np.array(p0)
+                p1_np = np.array(p1)
+                r = np.linalg.norm(p0_np - p1_np)
+                draw = cv2.circle(draw, p0, int(r), (0, 255, 0), thickness = 1)
+            elif self.current_control == 4:
+                draw = cv2.rectangle(draw, p0, p1, (0, 255, 0), thickness = 1)
+            else:
+                return
+            alpha = np.clip(draw.sum(axis = 2), 0, 255)
+            alpha = alpha[..., np.newaxis]
+            draw = np.dstack((draw, alpha))
+            draw = np.squeeze(draw)
+            draw = draw.astype(np.uint8)
+            q_image = QImage(draw.tobytes(), w, h, 4 * w, QImage.Format.Format_RGBA8888)
+            pixmap = QPixmap.fromImage(q_image)
+            self.board_label.setPixmap(pixmap)
+            self.save_draw = np.clip(draw[:, :, :3].sum(axis = 2), 0, 255)
+
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self.current_control is not None and self.current_control in [2, 3, 4]:
+            self.dragging = False
+            if self.save_draw is not None:
+                w = self.size().width() // 2
+                h = self.size().height() // 2
+                w = w - (self.screen_label.pixmap().size().width() // 2)
+                h = h - (self.screen_label.pixmap().size().height() // 2)
+                try:
+                    drawing = self.save_draw[h:h + self.screen_label.pixmap().size().height(), \
+                                             w:w + self.screen_label.pixmap().size().width()]
+                except:
+                    set_trace()
+                    return
+                if self.current_image not in self.drawn_shapes.keys():
+                    self.drawn_shapes[self.current_image] = [drawing]
+                else:
+                    drawn = self.drawn_shapes[self.current_image]
+                    drawn.append(drawing)
+                    self.drawn_shapes[self.current_image] = drawn
+                self.board_label.setPixmap(QPixmap()) 
+                self.display_images(self.current_image[0], self.current_image[1])
+
+
+    def resizeEvent(self, event):
+        if self.all_images is not None:
+            self.display_images(self.current_image[0], self.current_image[1])
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
+        # initial directory
         self.folder = "./1444306"
 
-        self.initUI()
-
-    def initUI(self):
+        # Configure Window sizes
         self.setWindowTitle("Spine CT")
         self.resize(QSize(1280, 720))
-        self.setMinimumSize(QSize(780, 700))
-        self.setMaximumSize(QSize(1920, 1080))
+        self.setMinimumSize(QSize(1280, 750))
+        self.setMaximumSize(QSize(1920, 1080))       
 
-
-        # Menu Bar for changing folders.
+        # Menu bar option for changing folders
         menubar = self.menuBar()
-        new_folder_action = QAction('Open New Folder', self)
-        new_folder_action.triggered.connect(self.new_folder_dialog)
+        action = QAction('Open New Folder', self)
+        action.triggered.connect(self.new_dir)
         file_menu = menubar.addMenu('File')
-        file_menu.addAction(new_folder_action)
+        file_menu.addAction(action)
 
+        # Overall layout of the application
+        main_widget = QWidget()
+        main_layout = QGridLayout()
+        main_widget.setLayout(main_layout)
+        self.setCentralWidget(main_widget)
 
-        # Overall Layouts
-        layout = QGridLayout()
-        widget = QWidget()
-        widget.setLayout(layout)
-        self.setCentralWidget(widget)
+        # Control options and buttons
         self.control = QWidget()
-        self.control.setMinimumHeight(100)
-        self.control.setMaximumHeight(100)
-        self.select = MyScrollArea()
-        self.select.setMinimumWidth(150)
-        self.select.setMaximumWidth(150)
-        self.display = QWidget()
-        # self.display.setStyleSheet("border: 1px solid blue;")
-        self.display.setStyleSheet("background-color: black;")
-        self.display.setMinimumWidth(590)
-        self.display.setMinimumHeight(560)
-        self.scrollbar = QScrollBar()
-        self.scrollbar.setValue(0)
-        self.scrollbar.setMinimum(0)
-        self.scrollbar.setFixedWidth(20)
-        self.scrollbar.setPageStep(1)
-        # self.scrollbar.setStyleSheet("border: 1px solid yellow;")
-        self.scrollbar.valueChanged.connect(self.change_slides)
-        self.display_layout = QVBoxLayout(self.display)
-        self.display_layout.setDirection(QVBoxLayout.Direction.RightToLeft)
-        self.display_layout.addWidget(self.scrollbar)
-        self.display_layout.setContentsMargins(0,0,0,0)
-        self.display_layout.setSpacing(0)
-        layout.addWidget(self.control, 0, 0, 1, 10)
-        layout.addWidget(self.select, 1, 0, 9, 1)
-        layout.addWidget(self.display, 1, 1, 9, 9)
-
-
-        # self.control/Drawing Layout
+        self.control.setFixedHeight(100)
         control_layout = QHBoxLayout(self.control)
-        button1 = QPushButton()
-        button1.setIcon(QIcon("assets/line.png"))
-        button1.setIconSize(QSize(70,70))
-        button1.setFixedSize(80, 80)
-        button2 = QPushButton()
-        button2.setIcon(QIcon("assets/circle.png"))
-        button2.setIconSize(QSize(70,70))
-        button2.setFixedSize(80, 80)
-        button3 = QPushButton(self.control)
-        button3.setIcon(QIcon("assets/square.png"))
-        button3.setFixedSize(80, 80)
-        button3.setIconSize(QSize(70,70))
-        button1.clicked.connect(self.change_control)
-        button2.clicked.connect(self.change_control)
-        button3.clicked.connect(self.change_control)
-        self.control_buttons = [button1, button2, button3]
+        control_layout.setDirection(QVBoxLayout.Direction.LeftToRight)
+        # Draw line, draw circle, draw box, get info, 
+        # move drawings, and clear display
         self.control_current = None
-        control_layout.addWidget(button1)
-        control_layout.addWidget(button2)
-        control_layout.addWidget(button3)
+        self.control_buttons = []
+        asset_files = ["info", "move", "line", "circle", "box", "clear"]
+        for asset in asset_files:
+            button = QPushButton()
+            button.setIcon(QIcon("assets/" + asset + ".png"))
+            button.setIconSize(QSize(70,70))
+            button.setFixedSize(80, 80)
+            button.clicked.connect(self.change_control)
+            self.control_buttons.append(button)
+            control_layout.addWidget(button)
         control_layout.addStretch(1)
 
-        self.drawing_board = QWidget(self)
-        self.drawing_board.setGeometry(self.display.pos().x(), self.display.pos().y(), \
-                                       self.display.width() - 20, self.display.height())
-        self.drawing_layout = QVBoxLayout(self.drawing_board)
-        self.drawing_layout.setContentsMargins(0,0,0,0)
-        self.drawing_layout.setSpacing(0)
-        self.drawing_board.setStyleSheet("border: 1px solid yellow;")
-        # self.drawing_board.hide()
+        # Selecting and moving between sub folders
+        self.select = UninteractiveScrollArea()
+        self.select.setFixedWidth(150)
+        self.select.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.select.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        # Show Preview Img on side
-        self.update_selection()
+        # A display widget for showing CT images and drawings
+        self.display = QWidget()
+        self.display.setStyleSheet("background-color: black;")
+        self.display.setMinimumWidth(1000)
+        self.display.setMinimumHeight(600)
+        self.display_layout = QVBoxLayout(self.display)
+        self.display_layout.setDirection(QVBoxLayout.Direction.RightToLeft)
+        self.display_layout.setContentsMargins(0, 0, 0, 0)
+        self.display_layout.setSpacing(0)
+        self.display_scrollbar = QScrollBar()
+        self.display_scrollbar.setValue(0)
+        self.display_scrollbar.setMinimum(0)
+        self.display_scrollbar.setFixedWidth(20)
+        self.display_scrollbar.setPageStep(1)
+        self.display_scrollbar.valueChanged.connect(self.change_scrollvalue)
+        self.display_layout.addWidget(self.display_scrollbar)
+        self.display_screen = DisplayWidget()
+        ct_img = self.extract_ct_and_update()
+        self.display_screen.update_images(ct_img)
+        self.display_layout.addWidget(self.display_screen)
 
-
-    def new_folder_dialog(self):
+        # set the main layout
+        main_layout.addWidget(self.control, 0, 0, 1, 10)
+        main_layout.addWidget(self.select, 1, 0, 9, 1)
+        main_layout.addWidget(self.display, 1, 1, 9, 9)
+    
+ 
+    def new_dir(self):
+        # Open a dialog and open a new directory to analyze
         folder = QFileDialog.getExistingDirectory(self, "Select Folder", self.folder)
         if folder and os.path.abspath(self.folder) != os.path.abspath(folder):
             self.folder = folder
             print("Selected folder:", os.path.abspath(self.folder))
-            self.update_selection()
+            ct_img = self.extract_ct_and_update()
+            self.display_screen.update_images(ct_img)
 
 
     def change_control(self):
-        # print(self.size())
-        if self.control_current:
+        # Update control option and signal display screen
+        if self.control_current is not None:
             self.control_current.setStyleSheet("")
         if self.control_current != self.sender():
             self.control_current = self.sender()
             self.sender().setStyleSheet("background-color: gray;")
         else:
             self.control_current = None
-        
-    def change_select(self):
-        if self.select_current is None:
-            self.select_buttons[0].setStyleSheet("border: 1px solid yellow;")
-            self.select_current = 0
-            self.change_display()
-            return 
-        elif self.select_current < 0:
-            return
+
+        if self.control_current is not None:
+            self.display_screen.change_control(self.control_buttons.index(self.control_current))
         else:
-            if self.select_buttons[self.select_current] != self.sender():
-                self.select_buttons[self.select_current].setStyleSheet("")
-                self.select_current = self.select_buttons.index(self.sender())
-                self.sender().setStyleSheet("border: 1px solid yellow;")
-                self.change_display()
+            self.display_screen.change_control(None)
 
-    def change_display(self):
+    def extract_ct_and_update(self):
+        # remove all widgets from self.select
+        child_widgets = self.select.findChildren(QWidget)
+        for widget in child_widgets:
+            if widget.layout() is QVBoxLayout:
+                widget.deleteLater()
 
-
-        self.scrollbar.setMaximum(len(self.ctimg[self.select_current]) - 1)
-        self.scrollbar.setValue(self.display_slides[self.select_current])
-        self.update_display()
-
-    def change_slides(self):
-
-        self.display_slides[self.select_current] = self.scrollbar.value()
-        self.update_display()
-
-    def update_display(self):
-        if self.display_layout is not None:
-            while self.display_layout.count() > 1:
-                item = self.display_layout.takeAt(1)
-                widget = item.widget()
-                if widget and widget != self.scrollbar:
-                    widget.deleteLater()
-        img = self.ctimg[self.select_current][self.display_slides[self.select_current]]
-        z = self.zoom_factor[self.select_current][self.display_slides[self.select_current]]
-        if z == 1:
-            h, w = img.shape
-            q_image = QImage(img, w, h, QImage.Format.Format_Grayscale16)
-        else:
-
-            h, w = img.shape[0] * z, img.shape[1] * z
-            new_img = cv2.resize(img, (int(w), int(h)))
-
-            w = self.display.size().width() - 50
-            h = self.display.size().height() - 50
-
-            w = min(new_img.shape[1], w)
-            h = min(new_img.shape[0], h)
-            new_img = new_img[new_img.shape[0] // 2 - h // 2 : new_img.shape[0] // 2 + h // 2, \
-                              new_img.shape[1] // 2 - w // 2 : new_img.shape[1] // 2 + w // 2]
-            q_image = QImage(new_img.tobytes(), new_img.shape[1], new_img.shape[0], QImage.Format.Format_Grayscale16)
-
-        pixmap = QPixmap.fromImage(q_image)
-        image_label = QLabel()
-        image_label.setPixmap(pixmap)
-        image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # print(pixmap.pos())
-        self.display_layout.addWidget(image_label)
-        # image_label.setStyleSheet("border: 1px solid red;")
-        self.display_layout.update()
-        self.resizeEvent(None)
-    
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_Up:
-            v = np.clip(self.scrollbar.value() - 1, 0, self.scrollbar.maximum())
-            self.scrollbar.setValue(v)
-            self.change_slides()
-        elif event.key() == Qt.Key.Key_Down:
-            v = np.clip(self.scrollbar.value() + 1, 0, self.scrollbar.maximum())
-            self.scrollbar.setValue(v)
-            self.change_slides()
-
-    def wheelEvent(self, event):
-        modifiers = QApplication.keyboardModifiers()
-        if modifiers == Qt.KeyboardModifier.ShiftModifier:
-            print("Shift + Scroll detected")
-            # print(self.select_current)
-            # print(self.display_slides[self.select_current])
-            delta = event.angleDelta().x()
-            z = self.zoom_factor[self.select_current][self.display_slides[self.select_current]]
-            self.zoom_factor[self.select_current][self.display_slides[self.select_current]] = np.clip(z + np.sign(delta) * 0.05, 1, 3)
-            # print(self.zoom_factor[self.select_current][self.display_slides[self.select_current]])
-            self.update_display()
-        else:
-            delta = event.angleDelta().y()  # Get the vertical scrolling delta
-            # print(delta)
-            v = np.clip(self.scrollbar.value() - (delta // 120), 0, self.scrollbar.maximum())
-            self.scrollbar.setValue(v)
-            self.change_slides()
-        # if delta > 0:
-        #     v = np.clip(self.scrollbar.value() - delta, 0, self.scrollbar.maximum())
-        #     self.scrollbar.setValue(v)
-        #     self.change_slides()
-        # elif delta < 0:
-            
-
-    def update_selection(self):
+        # From the selected directory, gather all folders
         pth = os.path.abspath(self.folder)
         dir = os.listdir(pth)
-
         dir = [os.path.abspath(os.path.join(pth, item))
                     for item in dir if os.path.isdir(os.path.join(pth, item))]
         dir.sort()
 
-        self.ctimg = []
-
+        # Open folders and find CT. If folder is empty, omit.
+        ct_img = []
         for d in dir:
-            temp = []
+            sub_d = []
             for f in os.listdir(d):
                 try:
                     ds = dicom.dcmread(os.path.join(d, f))
                 except:
                     pass
                 else:
-                    pixel_array = ds.pixel_array.astype(np.int16)
-                    temp.append(1 - pixel_array)
-            self.ctimg.append(temp)
+                    array = ds.pixel_array.astype(np.int16)
+                    array = cv2.normalize(array, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
+                    sub_d.append(array)
+            if len(sub_d) > 0:
+                ct_img.append(sub_d)
 
-
-        child_widgets = self.select.findChildren(QWidget)
-        for widget in child_widgets:
-            if widget.layout() is QVBoxLayout:
-                widget.deleteLater()
-
+        # Create a widget and layout for select
         widget = QWidget()
         widget_layout = QVBoxLayout(widget)
-        widget_layout.setSpacing(1)  
-        widget_layout.setContentsMargins(7, 0, 0, 0) 
+        widget_layout.setSpacing(1)
+        widget_layout.setContentsMargins(7, 0, 0, 0)
 
+        # Add buttons to select to switch between folders
         self.select_buttons = []
-
-        for ct_group in self.ctimg:
-            if len(ct_group) <= 0:
+        for ct_group in ct_img:
+            if len(ct_group) == 0:
                 continue
             h, w = ct_group[0].shape
-            image = QImage(bytearray(ct_group[0]), w, h, QImage.Format.Format_Grayscale16)
-
+            image = QImage(bytearray(ct_group[0]), w, h, QImage.Format.Format_Grayscale8)
             button = QPushButton()
             button.setFixedWidth(120)
             button.setFixedHeight(90)
             button.setIconSize(QSize(80, 80))
             button.setIcon(QIcon(QPixmap(image)))
+            button.clicked.connect(self.change_select)
             widget_layout.addWidget(button)
             self.select_buttons.append(button)
-            button.clicked.connect(self.change_select)
-
-
         self.select.setWidget(widget)
-        self.select.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-        self.select.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        self.display_slides = np.array([0] * len(self.ctimg))
-
-        self.zoom_factor = []
-        for i, ct_group in enumerate(self.ctimg):
-            self.zoom_factor.append([])
-            for _ in ct_group:
-                self.zoom_factor[i].append(1)
-
-        if len(self.ctimg) == 0:
-            self.select_current = -1
-        else: 
+        # An array to remember where last displayed image
+        self.select_history  = np.array([0] * len(ct_img))
+        self.select_max = [len(ct_group) for ct_group in ct_img]
+        if len(ct_img) == 0:
             self.select_current = None
+        else: 
+            self.select_current = -1
             self.change_select()
-
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self.control_current is not None:
-            self.drawing_board.show()
-            self.dragging = True
-            self.start_pos = event.position()
-
-    def draw_line(self, x, y):
-        if self.control_current is not None and self.dragging:
-            if self.drawing_layout is not None:
-                print(self.drawing_layout.count())
-                while self.drawing_layout.count() > 0:
-                    self.drawing_layout.takeAt(0)
-
-            w = self.drawing_board.size().width()
-            h = self.drawing_board.size().height()
-            drawn = np.zeros((w, h, 4)).astype(np.uint8)
-
-            bl = bresenham_line(self.start_pos.x() - self.drawing_board.pos().x(), \
-                                self.start_pos.y() - self.drawing_board.pos().y(), \
-                                x - self.drawing_board.pos().x(), \
-                                y - self.drawing_board.pos().y())
-            # print(self.start_pos.x() - self.drawing_board.pos().x())
-            # print(self.start_pos.y() - self.drawing_board.pos().y())
-            # print(x - self.drawing_board.pos().x())
-            # print(y - self.drawing_board.pos().y())
-            for x, y in bl:
-                drawn[round(x), round(y), 2] = 255
-                drawn[round(x), round(y), 3] = 255
-
-            q_image = QImage(drawn, w, h, QImage.Format.Format_RGBA8888)
-            pixmap = QPixmap.fromImage(q_image)
-            image_label = QLabel()
-            image_label.setPixmap(pixmap)
-            image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.drawing_layout.addWidget(image_label)
-            self.drawing_layout.update()
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self.control_current is not None:
-            # self.draw_line(event.position().x(), event.position().y())
-            self.dragging = False
-            self.drawing_board.show()
+                
+        return ct_img
     
-    def mouseMoveEvent(self, event):
-        if self.control_current is not None and self.dragging :
-            # pass
-            self.draw_line(event.position().x(), event.position().y())
+
+    def change_select(self):
+        # -1 is for initializing
+        if self.select_current < 0 :
+            self.select_buttons[0].setStyleSheet("border: 1px solid yellow;")
+            self.select_current = 0
+            self.display_scrollbar.setMaximum(self.select_max[self.select_current] - 1)
+            self.display_scrollbar.setValue(self.select_history[self.select_current])
+            self.change_display()
+        # In the case that a button triggers this function
+        elif self.select_buttons[self.select_current] != self.sender():
+            self.select_buttons[self.select_current].setStyleSheet("")
+            self.select_current = self.select_buttons.index(self.sender())
+            self.sender().setStyleSheet("border: 1px solid yellow;")
+            self.display_scrollbar.setMaximum(self.select_max[self.select_current] - 1)
+            self.display_scrollbar.setValue(self.select_history[self.select_current])
+            self.change_display()
+
+
+    def change_scrollvalue(self):
+        # Triggers when scroll wheel value is changed
+        self.select_history[self.select_current] = self.display_scrollbar.value()
+        self.change_display()
+
+
+    def change_display(self):
+        # Calls a function in DisplayWidget to change the display
+        self.display_screen.display_images(self.select_current, self.display_scrollbar.value())
+
+
+    def keyPressEvent(self, event):
+        # Handles even when UP or DOWN keys are pressed
+        if event.key() == Qt.Key.Key_Up:
+            v = np.clip(self.display_scrollbar.value() - 1, 0, \
+                        self.display_scrollbar.maximum())
+            self.display_scrollbar.setValue(v)
+            self.change_scrollvalue()
+        elif event.key() == Qt.Key.Key_Down:
+            v = np.clip(self.display_scrollbar.value() + 1, 0, \
+                        self.display_scrollbar.maximum())
+            self.display_scrollbar.setValue(v)
+            self.change_scrollvalue()
+
+
+    def wheelEvent(self, event):
+        # Handles mouse wheel events
+        modifiers = QApplication.keyboardModifiers()
+        if modifiers == Qt.KeyboardModifier.ShiftModifier:
+            event.ignore()
         else:
-            print("-------------------")
-            print(self.drawing_board.size())
-            print(event.position())
-            print(self.drawing_board.pos())
+            delta = event.angleDelta().y()
+            v = np.clip(self.display_scrollbar.value() - np.sign(delta), 0, \
+                        self.display_scrollbar.maximum())
+            self.display_scrollbar.setValue(v)
+            self.change_scrollvalue()
 
-    def resizeEvent(self, event):
-        if self.drawing_board is not None:
-            self.drawing_board.setGeometry(self.display.pos().x(), self.display.pos().y(), \
-                                       self.display.width() - 20, self.display.height())
-
-
-def bresenham_line(x1, y1, x2, y2):
-    dx = abs(x2 - x1)
-    dy = abs(y2 - y1)
-    sx = 1 if x1 < x2 else -1
-    sy = 1 if y1 < y2 else -1
-    err = dx - dy
-
-    line = []
-
-    while True:
-        line.append((x1, y1))
-
-        if x1 == x2 and y1 == y2:
-            break
-
-        e2 = 2 * err
-        if e2 > -dy:
-            err -= dy
-            x1 += sx
-        if e2 < dx:
-            err += dx
-            y1 += sy
-
-    return line
 
 
 if __name__ == "__main__":
@@ -394,5 +488,3 @@ if __name__ == "__main__":
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
-
-
