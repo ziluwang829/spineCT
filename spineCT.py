@@ -32,21 +32,31 @@ class Shape():
         self.ndarray = ndarray
         self.color = color
 
+
     # color could be 0: Red, 1: Green, 2: Blue, 3: Yellow
     def change_color(self, color):
         self.color = color
 
 
     def draw_on_array(self, ndarray):
-        pass
+        if self.color == 0:
+            c = [255, 0, 0]
+        elif self.color == 1:
+            c = [0, 255, 0]
+        elif self.color == 2:
+            c = [0, 0, 255]
+        else:
+            c = [0, 255, 255]
+        ndarray[np.where(self.ndarray > 0)] = np.array(c)
+        return ndarray
 
 
-    def on(self, x, y):
-        pass
+    def on(self, position):
+        return True
 
 
     def info(self):
-        pass
+        return str(len(np.where(self.ndarray > 0)[0]))
 
 
 
@@ -86,15 +96,18 @@ class DisplayWidget(QWidget):
         self.info = QWidget()
         self.info.setFixedSize(QSize(200, 200))
         self.info.move(50, 50)
-        self.info.setStyleSheet("background : transparent; color: red; border: 1px double red")
+        self.info.setStyleSheet("background : transparent;")
 
         self.info_label = QLabel(self.info)
-        self.info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.info_label.setStyleSheet("color: red; border : 1px double red;")
+        self.info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.info_layout = QHBoxLayout(self.info)
         self.info_layout.addWidget(self.info_label)
         self.info_layout.setContentsMargins(0, 0, 0, 0)
         self.info_layout.setSpacing(0)
+
+        self.info_label.hide()
 
         # Set stacking layout and add screen and board
         self.layout = QStackedLayout(self)
@@ -131,7 +144,7 @@ class DisplayWidget(QWidget):
 
 
     # TODO
-    def display_image(self, folder_index, image_index, drawn = True):
+    def display_image(self, folder_index, image_index, reset_color = True):
         if self.all_images is not None:
             # Set current
             self.current_image = (folder_index, image_index)
@@ -165,15 +178,25 @@ class DisplayWidget(QWidget):
             self.screen_label.setPixmap(pixmap)
         
         
-    def refresh_image(self):
-        self.display_image(self.current_image[0], self.current_image[1])
+    def refresh_image(self, reset_color = True):
+        self.display_image(self.current_image[0], self.current_image[1], reset_color = reset_color)
 
 
     def display_info(self, position):
-        pass
+        if self.current_image is not None:
+            if self.current_image in self.drawn_shapes.keys():
+                for s in self.drawn_shapes[self.current_image]:
+                    if s.on(position):
+                        s.change_color(0)
+                        self.info_label.show()
+                        self.info_label.setText(s.info())
+                        break
+                self.refresh_image(reset_color = False)
 
 
     def change_control(self, control):
+        if self.current_control == 0 and control != 0:
+            self.info_label.hide()
         self.current_control = control
         if self.current_control == 5 and self.current_image is not None:
             if self.current_image in self.drawn_shapes.keys():
@@ -188,7 +211,7 @@ class DisplayWidget(QWidget):
             i, j = self.current_image
             z = self.zoom_factors[i][j]
             self.zoom_factors[i][j] = np.clip(z + np.sign(delta) * 0.05, 1, 3)
-            self.refresh_image()
+            self.refresh_image(reset_color = False)
         else:
             event.ignore()
 
@@ -263,7 +286,7 @@ class DisplayWidget(QWidget):
 
     def resizeEvent(self, event):
         if self.all_images is not None:
-            self.refresh_images()
+            self.refresh_image(reset_color = False)
 
 
 
