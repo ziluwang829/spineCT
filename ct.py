@@ -26,7 +26,7 @@ class CTImage:
         expand_h, expand_w = (0, 0)
         for shape in self.shapelist:
             offset_h, offset_w = shape.offset()
-            shape_h,  shape_w  = shape.matrix()
+            shape_h,  shape_w  = shape.matrix().shape
 
             if offset_h >= 0 and matrix_h + expand_h < offset_h + shape_h:
                 expand_h = offset_h + shape_h - matrix_h
@@ -40,8 +40,21 @@ class CTImage:
             
         img = np.pad(self.matrix, ((expand_h, expand_h), (expand_w, expand_w)), \
                      'constant', constant_values = 0)
-        # TODO finish adding shapes to img, allows shapes to br anywhere
-        return img
+        img2 = np.zeros((img.shape[0], img.shape[1], 3 ))
+        img2[:,:,0] = img
+        img2[:,:,1] = img
+        img2[:,:,2] = img
+
+        for shape in self.shapelist:
+            color = shape.get_color()
+            offset_h, offset_w = shape.get_offset()
+            draw_matrix = shape.get_matrix()
+            shape_h,  shape_w  = draw_matrix.shape
+
+            img2[expand_h + offset_h : expand_h + offset_h + shape_h, \
+                expand_w + offset_w : expand_w + offset_w + shape_w, :] = color
+
+        return img2
 
 
     def shapes(self) -> list[Shape]:
@@ -54,8 +67,7 @@ class CTImage:
         self.shapelist.remove(shape)
 
     def __repr__(self) -> str:
-        pass
-
+        return self.dir + " " + self.file
 
 
 
