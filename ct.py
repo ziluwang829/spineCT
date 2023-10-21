@@ -40,10 +40,7 @@ class CTImage:
             
         img = np.pad(self.matrix, ((expand_h, expand_h), (expand_w, expand_w)), \
                      'constant', constant_values = 0)
-        img2 = np.zeros((img.shape[0], img.shape[1], 3 ))
-        img2[:,:,0] = img
-        img2[:,:,1] = img
-        img2[:,:,2] = img
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
 
         for shape in self.shapelist:
             color = shape.get_color()
@@ -51,10 +48,10 @@ class CTImage:
             draw_matrix = shape.get_matrix()
             shape_h,  shape_w  = draw_matrix.shape
 
-            img2[expand_h + offset_h : expand_h + offset_h + shape_h, \
+            img[expand_h + offset_h : expand_h + offset_h + shape_h, \
                 expand_w + offset_w : expand_w + offset_w + shape_w, :] = color
 
-        return img2
+        return img
 
 
     def shapes(self) -> list[Shape]:
@@ -65,6 +62,9 @@ class CTImage:
 
     def detach(self, shape):
         self.shapelist.remove(shape)
+
+    def empty(self):
+        self.shapelist = list()
 
     def __repr__(self) -> str:
         return self.dir + " " + self.file
@@ -96,4 +96,9 @@ class CTCases:
 
     # return the CTImage object of case i, image j 
     def get_CTImage(self, i, j) -> CTImage:
-        return self.cases[i][j]
+        try:
+            x = self.cases[i][j]
+        except:
+            return None
+        else:
+            return self.cases[i][j]

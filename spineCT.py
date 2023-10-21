@@ -1,13 +1,12 @@
 from PyQt6.QtWidgets import QApplication, QMainWindow, QPushButton, \
     QWidget, QGridLayout, QFileDialog, QHBoxLayout, QVBoxLayout, QScrollBar
-from PyQt6.QtGui import QAction, QPixmap, QIcon
+from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtCore import QSize, Qt
 import numpy as np
 import sys
 import os
 
 from widgets import *
-from shapes import *
 from ct import *
 
 from pdb import set_trace
@@ -18,10 +17,10 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        # initial directory
-        self.folder = "./1444796"
+        # initial directory to load from
+        self.folder = "./1444306"
 
-        # Configure Window sizes
+        # Configure window sizes
         self.setWindowTitle("Spine CT")
         self.resize(QSize(1280, 720))
         self.setMinimumSize(QSize(1280, 750))
@@ -46,9 +45,11 @@ class MainWindow(QMainWindow):
         control_layout = QHBoxLayout(self.control)
         control_layout.setDirection(QVBoxLayout.Direction.LeftToRight)
 
-        # options: info, edit, move
-        # shapes: line, circle, rect, ellipse, polygon 
-        # remove: clear all shape
+        # none: (0) none
+        # options: (1) info, (2) edit, (3) move
+        # shapes: (4) line, (5) circle, (6)rect, (7) ellipse, (8) polygon 
+        # remove: (9) clear
+        # to access the buttons, self.control_buttons[index]
         self.control_current = 0
         self.control_buttons = [None]
         asset_options = ["info", "edit", "move"]
@@ -61,7 +62,9 @@ class MainWindow(QMainWindow):
             button.setFixedSize(80, 80)
             button.clicked.connect(self.change_control)
             self.control_buttons.append(button)
-            control_layout.addWidget(button)
+            # TODO implement "edit" and remove
+            if asset != "edit":
+                control_layout.addWidget(button)
         control_layout.addStretch(1)
 
         # Selecting and moving between sub folders
@@ -87,23 +90,23 @@ class MainWindow(QMainWindow):
         self.display_scrollbar.valueChanged.connect(self.change_scrollvalue)
         self.display_layout.addWidget(self.display_scrollbar)
         self.display_screen = DisplayWidget()
-        self.ct = self.extract_ct_and_update()
+        self.extract_ct_and_update()
         self.display_screen.update_ct(self.ct)
         self.display_layout.addWidget(self.display_screen)
 
-        # set the main layout
+        # Set the main layout
         main_layout.addWidget(self.control, 0, 0, 1, 10)
         main_layout.addWidget(self.select, 1, 0, 9, 1)
         main_layout.addWidget(self.display, 1, 1, 9, 9)
     
  
     def new_dir(self):
-        # Open a dialog and open a new directory to analyze
+        # Open a dialog and open a new directory to load from
         folder = QFileDialog.getExistingDirectory(self, "Select Folder", self.folder)
         if folder and os.path.abspath(self.folder) != os.path.abspath(folder):
             self.folder = folder
             print("Selected folder:", os.path.abspath(self.folder))
-            self.ct = self.extract_ct_and_update()
+            self.extract_ct_and_update()
             self.display_screen.update_ct(self.ct)
 
 
@@ -116,7 +119,9 @@ class MainWindow(QMainWindow):
             self.control_buttons[self.control_current].setStyleSheet("")
 
         # If the button is same as selected, un-select control
-        if self.control_current != sender:
+        if sender == 9:
+            self.control_current = sender
+        elif self.control_current != sender:
             self.control_current = sender
             self.sender().setStyleSheet("background-color: gray;")
         else:
@@ -127,6 +132,7 @@ class MainWindow(QMainWindow):
 
         # If the sender is "clear", then un-select control
         self.control_current = 0 if self.control_current == 9 else self.control_current 
+
 
     def extract_ct_and_update(self):
         # remove all widgets from self.select
@@ -156,6 +162,9 @@ class MainWindow(QMainWindow):
             if len(ct_group) > 0:
                 ct.add(ct_group)
 
+        # Save ct
+        self.ct = ct
+
         # Create a widget and layout for select
         widget = QWidget()
         widget_layout = QVBoxLayout(widget)
@@ -164,9 +173,9 @@ class MainWindow(QMainWindow):
 
         # Add buttons to select to switch between folders
         self.select_buttons = []
-        ct_sizes = ct.sizes()
-        for i in range(len(ct_sizes)) :
-            if ct_sizes[i] == 0:
+        self.select_max = ct.sizes()
+        for i in range(len(self.select_max)) :
+            if self.select_max[i] == 0:
                 continue
             button = QPushButton()
             button.setFixedWidth(120)
@@ -179,11 +188,10 @@ class MainWindow(QMainWindow):
         self.select.setWidget(widget)
 
         # An array to remember where last displayed image
-        self.select_history  = np.zeros(len(ct_sizes))
-        self.select_max = ct_sizes
+        self.select_history  = np.zeros(len(self.select_max)).astype(np.int16)
 
-        # initialize display
-        if len(ct_sizes) == 0:
+        # Initialize display
+        if len(self.select_max) == 0:
             self.select_current = None
         else: 
             self.select_buttons[0].setStyleSheet("border: 1px solid yellow;")
@@ -191,8 +199,6 @@ class MainWindow(QMainWindow):
             self.display_scrollbar.setMaximum(self.select_max[self.select_current] - 1)
             self.display_scrollbar.setValue(self.select_history[self.select_current])
             self.change_display()
-                
-        return ct
     
 
     def change_select(self):
@@ -221,12 +227,13 @@ class MainWindow(QMainWindow):
         button = self.select_buttons[self.select_current]
         icon = self.ct.get_QIcon(self.select_current, self.display_scrollbar.value())
         button.setIcon(icon)
+        
         # Calls a function in DisplayWidget to change the display
         self.display_screen.display_image(self.select_current, self.display_scrollbar.value())
 
 
     def keyPressEvent(self, event):
-        # Handles even when UP or DOWN keys are pressed
+        # Handles events when UP or DOWN keys are pressed
         if event.key() == Qt.Key.Key_Up:
             v = np.clip(self.display_scrollbar.value() - 1, 0, \
                         self.display_scrollbar.maximum())

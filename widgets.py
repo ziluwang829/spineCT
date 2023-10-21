@@ -1,11 +1,17 @@
 from PyQt6.QtWidgets import QScrollArea
 from PyQt6.QtWidgets import QApplication, QMainWindow, QPushButton, \
-    QWidget, QGridLayout, QFileDialog, QHBoxLayout, QVBoxLayout, QScrollBar
+    QWidget, QGridLayout, QFileDialog, QHBoxLayout, QVBoxLayout, QScrollBar, QStackedLayout, QLabel, QSizePolicy
 from PyQt6.QtGui import QAction, QPixmap, QIcon
 from PyQt6.QtCore import QSize, Qt
 import numpy as np
 import sys
 import os
+
+from widgets import *
+from shapes import *
+from ct import *
+
+from pdb import set_trace
 
 
 
@@ -84,50 +90,46 @@ class DisplayWidget(QWidget):
         self.layout.addWidget(self.screen_)
 
         # No data available for now
-        self.current_control = None
+        self.current_control = 0
         self.current_image = None
-        self.all_images = None
+        self.ctcases = None
         self.zoom_factors = None
-        self.drawn_shapes = None
         self.save_draw = None
 
 
     def update_ct(self, ct):
-        if ct_img is None or len(ct_img) <= 0:
+        if ct is None or len(ct.sizes()) <= 0:
             return
+        # Set current control to default
+        self.current_control = 0
         # Set current displayed image
         self.current_image = (0, 0)
         # Set all ct images
-        self.all_images = ct_img
+        self.ctcases = ct
         # Set all zoom factors
-        self.zoom_factors = [[1 for ct in ct_group] for ct_group in ct_img]
-        # Set empty dict, key is (int, int) to get a list 
-        # of drawn shapes. 
-        self.drawn_shapes = {}
+        self.zoom_factors = [[1 for _ in range(cts)] for cts in ct.sizes()]
         # Redraw first image
         self.refresh_image()
         # A reference to a Shape object that will be saved
         self.save_draw = None
 
 
-    # TODO
     def display_image(self, folder_index, image_index, reset_color = True):
-        if self.all_images is not None:
+        if self.ctcases is not None:
+
+            # switch info
+            if self.current_control == 1 and self.current_image is not None:
+                self.display_info()
+
             # Set current
             self.current_image = (folder_index, image_index)
 
-            # convert image from gray to rbg
-            img = self.all_images[folder_index][image_index]
-            rgb_image = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
-
+            # get img with the drawings
+            ct_img = self.ctcases.get_CTImage(folder_index, image_index)
+            rgb_image = ct_img.image()
             # Get zoom factor, height, and width
             z = self.zoom_factors[self.current_image[0]][self.current_image[1]]
             h, w, _ = rgb_image.shape
-
-            if self.current_image in self.drawn_shapes.keys() and self.drawn_shapes[self.current_image] is not None:
-                drawn = self.drawn_shapes[self.current_image]
-                for d in drawn:
-                    rgb_image[np.where(d > 0)] = np.array([0, 0, 255])
 
             if z != 1:
                 rgb_image = cv2.resize(rgb_image, (int(w * z), int(h * z)))
@@ -145,32 +147,29 @@ class DisplayWidget(QWidget):
             self.screen_label.setPixmap(pixmap)
         
         
-    def refresh_image(self, reset_color = True):
-        self.display_image(self.current_image[0], self.current_image[1], reset_color = reset_color)
+    def refresh_image(self):
+        self.display_image(self.current_image[0], self.current_image[1])
+        
 
-
-    def display_info(self, position):
+    def display_info(self):
         if self.current_image is not None:
-            if self.current_image in self.drawn_shapes.keys():
-                for s in self.drawn_shapes[self.current_image]:
-                    if s.on(position):
-                        s.change_color(0)
-                        self.info_label.show()
-                        self.info_label.setText(s.info())
-                        break
-                self.refresh_image(reset_color = False)
+            i, j = self.current_image
+            self.info_label.show()
+            self.info_label.setText(str(self.ctcases.get_CTImage(i, j)))
 
 
     def change_control(self, control):
-        if self.current_control == 0 and control != 0:
+        if self.current_control == 1 and control != 1:
             self.info_label.hide()
         self.current_control = control
-        if self.current_control == 5 and self.current_image is not None:
-            if self.current_image in self.drawn_shapes.keys():
-                self.drawn_shapes.pop(self.current_image)
-                self.refresh_image()
+        if self.current_control == 1 and self.current_image is not None:
+            self.display_info()
+        if self.current_control == 9 and self.current_image is not None:
+            i, j = self.current_image
+            ct_img = self.ctcases.get_CTImage(i, j)
+            ct_img.empty()
+            self.refresh_image()
             self.current_control = 0
-            # make sure that when clear is entered, control returns to 0 at end.
 
 
     def wheelEvent(self, event):
@@ -180,7 +179,7 @@ class DisplayWidget(QWidget):
             i, j = self.current_image
             z = self.zoom_factors[i][j]
             self.zoom_factors[i][j] = np.clip(z + np.sign(delta) * 0.05, 1, 3)
-            self.refresh_image(reset_color = False)
+            self.refresh_image()
         else:
             event.ignore()
 
@@ -254,6 +253,6 @@ class DisplayWidget(QWidget):
 
 
     def resizeEvent(self, event):
-        if self.all_images is not None:
-            self.refresh_image(reset_color = False)
+        if self.ctcases is not None:
+            self.refresh_image()
 

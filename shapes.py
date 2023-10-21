@@ -1,8 +1,9 @@
 import numpy as np
 
 
+
 class Shape():
-    def __init__(self, ndarray, offset, color = [0, 255, 0].astype(np.uint8)):
+    def __init__(self, ndarray, offset, color = np.array([0, 255, 0]).astype(np.uint8)):
         self.matrix = ndarray
         self.color = color
         self.offset = offset
@@ -19,11 +20,17 @@ class Shape():
     def get_offset(self):
         return self.offset
     
-    def is_hiding(self):
+    def get_hide(self):
         return self.hide
+
+    def get_matrix(self, matrix):
+        self.matrix = matrix
 
     def change_color(self, color):
         self.color = color
+
+    def change_offset(self, offset):
+        self.offset = offset
 
     def change_hide(self, hide):
         self.hide = hide
