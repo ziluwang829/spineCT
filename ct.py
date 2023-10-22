@@ -18,41 +18,8 @@ class CTImage:
         self.shapelist = list()
 
 
-    def image(self, draw = True) -> np.ndarray:
-        if not draw:
-            return self.matrix
-        
-        matrix_h, matrix_w = self.matrix.shape
-        expand_h, expand_w = (0, 0)
-        for shape in self.shapelist:
-            offset_h, offset_w = shape.offset()
-            shape_h,  shape_w  = shape.matrix().shape
-
-            if offset_h >= 0 and matrix_h + expand_h < offset_h + shape_h:
-                expand_h = offset_h + shape_h - matrix_h
-            if offset_h < 0 and -1 * expand_h > offset_h:
-                expand_h = -1 * offset_h
-
-            if offset_w >= 0 and matrix_w + expand_w < offset_w + shape_w:
-                expand_w = offset_w + shape_w - matrix_w
-            if offset_w < 0 and -1 * expand_w > offset_w:
-                expand_w = -1 * offset_w
-            
-        img = np.pad(self.matrix, ((expand_h, expand_h), (expand_w, expand_w)), \
-                     'constant', constant_values = 0)
-        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
-
-        for shape in self.shapelist:
-            color = shape.get_color()
-            offset_h, offset_w = shape.get_offset()
-            draw_matrix = shape.get_matrix()
-            shape_h,  shape_w  = draw_matrix.shape
-
-            img[expand_h + offset_h : expand_h + offset_h + shape_h, \
-                expand_w + offset_w : expand_w + offset_w + shape_w, :] = color
-
-        return img
-
+    def image(self) -> np.ndarray:
+        return self.matrix
 
     def shapes(self) -> list[Shape]:
         return self.shapelist
@@ -67,7 +34,7 @@ class CTImage:
         self.shapelist = list()
 
     def __repr__(self) -> str:
-        return self.dir + " " + self.file
+        return self.dir + "\n" + self.file
 
 
 
@@ -89,7 +56,7 @@ class CTCases:
 
     # return a QIcon of the CTImage object of case i, image j
     def get_QIcon(self, i, j) -> QIcon:
-        img = self.cases[i][j].image(draw = False)
+        img = self.cases[i][j].image()
         h, w = img.shape
         return QIcon(QPixmap(QImage(bytearray(img), w, h, QImage.Format.Format_Grayscale8)))
     
