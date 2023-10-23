@@ -5,7 +5,7 @@ from PyQt6.QtGui import QAction, QPixmap, QIcon
 from PyQt6.QtCore import QSize, Qt
 import numpy as np
 import sys
-import os
+import time
 
 from widgets import *
 from shapes import *
@@ -96,8 +96,12 @@ class DisplayWidget(QWidget):
 
     def display_image(self, folder_index, image_index):
         if self.ct is not None:
-            # TODO Must change all colors back to blue before changing image
 
+            # Must change all colors back to blue before changing image
+            if folder_index != self.current_image[0] or image_index != self.current_image[1]:
+                ct_img_past = self.ct.get_CTImage(self.current_image[0], self.current_image[1])
+                for s in ct_img_past.shapes():
+                    s.change_color((0, 0, 255))
 
             # switch info
             if self.current_control == 1 and self.current_image is not None:
@@ -153,20 +157,69 @@ class DisplayWidget(QWidget):
                 gray_img = np.pad(gray_img, ((0, 0), (pad_left, pad_right)), mode='constant')
 
             img = cv2.cvtColor(gray_img, cv2.COLOR_GRAY2RGB)
-            # Get zoom factor, height, and width
-            z = self.zoom_factors[self.current_image[0]][self.current_image[1]]
             h, w, _ = img.shape
 
-            if z != 1:
-                img = cv2.resize(img, (int(w * z), int(h * z)))
+            # draw
+            for s in ct_img.shapes():
+                if isinstance(s, Line):
+                    p0, p1 = s.get_points()
+                    img = cv2.line(img, (w // 2 + p0[0], h // 2 + p0[1]), \
+                                   (w // 2 + p1[0], h // 2 + p1[1]), color = s.get_color(), thickness = 1)
+                elif isinstance(s, Circle):
+                    p0, r = s.get_point_radius()
+                    img = cv2.circle(img, (w // 2 + p0[0], h // 2 + p0[1]), \
+                                   r, color = s.get_color(), thickness = 1)
+                elif isinstance(s, Rect):
+                    p0, p1 = s.get_points()
+                    img = cv2.rectangle(img, (w // 2 + p0[0], h // 2 + p0[1]), \
+                                   (w // 2 + p1[0], h // 2 + p1[1]), color = s.get_color(), thickness = 1)
+                elif isinstance(s, Ellipse):
+                    p0, p1 = s.get_points()
+                    p0 = (w // 2 + p0[0], h // 2 + p0[1])
+                    p1 = (w // 2 + p1[0], h // 2 + p1[1])
+                    p2 = (p0[0], p1[1])
+                    rr = cv2.RotatedRect(p0, p2, p1)
+                    img = cv2.ellipse(img, rr, \
+                                      color = s.get_color(), thickness = 1)
+                elif isinstance(s, Polygon):
+                    ps = s.get_points()
+                    if len(ps) == 0:
+                        pass
+                    elif len(ps) <= 2:
+                        ps = [[w // 2 + p[0], h // 2 + p[1]] for p in ps]
+                        for p in ps:
+                            img[p[1], p[0]] = [0, 255, 0]
+                    else:
+                        ps = [[w // 2 + p[0], h // 2 + p[1]] for p in ps]
+                        ps = np.array(ps)
+                        ps = ps.reshape(1, -1, 2)
+                        img = cv2.polylines(img, [ps], True, color = s.get_color(), thickness = 1)
 
-                w = min(img.shape[1], self.size().width())
-                h = min(img.shape[0], self.size().height())
 
-                img = img[img.shape[0] // 2 - h // 2 : img.shape[0] // 2 + h // 2, \
-                              img.shape[1] // 2 - w // 2 : img.shape[1] // 2 + w // 2]
-                
-                h, w, _ = img.shape
+            # Get zoom factor, height, and width
+            z = self.zoom_factors[self.current_image[0]][self.current_image[1]]
+
+            img = cv2.resize(img, (int(w * z), int(h * z)))
+            h, w, _ = img.shape
+
+            if max_h < h:
+                if h % 2 == max_h % 2:
+                    crop_top = (h - max_h) // 2
+                else: 
+                    crop_top = (h - max_h) // 2 if h % 2 != 0 else (h - max_h) // 2 + 1
+                crop_bottom = crop_top + max_h
+                img = img[crop_top:crop_bottom, :]
+                assert (img.shape[0] == max_h)
+            if max_w < w:
+                if w % 2 == max_w % 2:
+                    crop_left = (w - max_w) // 2
+                else: 
+                    crop_left = (w - max_w) // 2 if w % 2 != 0 else (w - max_w) // 2 + 1
+                crop_right = crop_left + max_w
+                img = img[:, crop_left:crop_right]
+                assert (img.shape[1] == max_w)
+
+            h, w, _ = img.shape
 
             q_image = QImage(img.tobytes(), w, h, 3 * w, QImage.Format.Format_RGB888)
             pixmap = QPixmap.fromImage(q_image)
@@ -188,6 +241,7 @@ class DisplayWidget(QWidget):
         if self.current_control == 1 and control != 1:
             self.info_label.hide()
         self.current_control = control
+        self.current_shape = None
         if self.current_control == 1 and self.current_image is not None:
             self.display_info()
         if self.current_control == 9 and self.current_image is not None:
@@ -210,72 +264,96 @@ class DisplayWidget(QWidget):
             event.ignore()
 
 
+    def adjusted_point(self, x, y):
+        max_h = self.size().height()
+        max_w = self.size().width()
+        z = self.zoom_factors[self.current_image[0]][self.current_image[1]]
+        p = (x - max_w // 2, y - max_h // 2)
+        r = np.sqrt(p[0]**2 + p[1]**2)
+        theta = -1 * np.arctan2(p[1], p[0]) 
+        p = (int((r / z) * np.cos(theta)), -1 * int((r / z) * np.sin(theta)))
+        return p
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and self.current_control is not None:
-            self.start_pos = event.position()
-            if self.current_control == 0:
-                self.display_info(event.position())
-            elif self.current_control == 1:
+            if self.current_control == 1:
+                self.display_info()
+            elif self.current_control in [4, 5, 6, 7]:
+                self.start_pos = event.position()
                 self.dragging = True
-            elif self.current_control in [2, 3, 4]:
-                self.dragging = True
-
-
+            elif self.current_control == 8:
+                if self.current_shape is None:
+                    p = self.adjusted_point(event.position().x(), event.position().y())
+                    self.current_shape = Polygon([p])
+                    ct_img = self.ct.get_CTImage(self.current_image[0], self.current_image[1])
+                    ct_img.attach(self.current_shape)
+                else:
+                    ps = self.current_shape.get_points()
+                    p = self.adjusted_point(event.position().x(), event.position().y())
+                    ps.append(p)
+                    self.current_shape.change_points(ps)
+                self.refresh_image()
+        if event.button() == Qt.MouseButton.RightButton and self.current_control == 8:
+            self.current_shape.change_color((0, 0, 255))
+            self.current_shape = None
+            self.refresh_image()
 
 
 
     def mouseMoveEvent(self, event):
-        if self.current_control is not None and self.current_control in [2, 3, 4] and self.dragging:
-            w = self.size().width()
-            h = self.size().height()
+        if self.current_control is None:
+            return
+        elif self.current_control in [4, 5, 6, 7] and self.dragging:
 
-            p0 = (int(self.start_pos.x()), int(self.start_pos.y()))
-            p1 = (int(event.position().x()), int(event.position().y()))
-            draw = np.zeros((h, w, 3)).astype(np.uint8)
-            if self.current_control == 2:
-                draw = cv2.line(draw, p0, p1, (0, 255, 0), thickness = 1)
-            elif self.current_control == 3:
-                p0_np = np.array(p0)
-                p1_np = np.array(p1)
-                r = np.linalg.norm(p0_np - p1_np)
-                draw = cv2.circle(draw, p0, int(r), (0, 255, 0), thickness = 1)
-            elif self.current_control == 4:
-                draw = cv2.rectangle(draw, p0, p1, (0, 255, 0), thickness = 1)
+            # max_h = self.size().height()
+            # max_w = self.size().width()
+
+            # z = self.zoom_factors[self.current_image[0]][self.current_image[1]]
+
+            # p0 = (self.start_pos.x() - max_w // 2, self.start_pos.y() - max_h // 2)
+            # p1 = (event.position().x() - max_w // 2, event.position().y() - max_h // 2)
+            # r0 = np.sqrt(p0[0]**2 + p0[1]**2)
+            # r1 = np.sqrt(p1[0]**2 + p1[1]**2)
+            # theta0 = -1 * np.arctan2(p0[1], p0[0]) 
+            # theta1 = -1 * np.arctan2(p1[1], p1[0])
+            # p0 = (int((r0 / z) * np.cos(theta0)), -1 * int((r0 / z) * np.sin(theta0)))
+            # p1 = (int((r1 / z) * np.cos(theta1)), -1 * int((r1 / z) * np.sin(theta1)))
+            p0 = self.adjusted_point(self.start_pos.x(), self.start_pos.y())
+            p1 = self.adjusted_point(event.position().x(), event.position().y())
+
+            if self.current_shape is None:
+                if self.current_control == 4:
+                    self.current_shape = Line(p0, p1)
+                elif self.current_control == 5:
+                    self.current_shape = Circle(p0, int(np.linalg.norm(np.array(p1) - np.array(p0))))
+                elif self.current_control == 6:
+                    self.current_shape = Rect(p0, p1)
+                elif self.current_control == 7:
+                    self.current_shape = Ellipse(p0, p1)
+                ct_img = self.ct.get_CTImage(self.current_image[0], self.current_image[1])
+                ct_img.attach(self.current_shape)
             else:
-                return
-            alpha = np.clip(draw.sum(axis = 2), 0, 255)
-            alpha = alpha[..., np.newaxis]
-            draw = np.dstack((draw, alpha))
-            draw = np.squeeze(draw)
-            draw = draw.astype(np.uint8)
-            q_image = QImage(draw.tobytes(), w, h, 4 * w, QImage.Format.Format_RGBA8888)
-            pixmap = QPixmap.fromImage(q_image)
-            self.board_label.setPixmap(pixmap)
-            self.save_draw = np.clip(draw[:, :, :3].sum(axis = 2), 0, 255)
+                if self.current_control == 4:
+                    self.current_shape.change_points(p0, p1)
+                elif self.current_control == 5:
+                    self.current_shape.change_point_radius(p0, int(np.linalg.norm(np.array(p1) - np.array(p0))))
+                elif self.current_control == 6:
+                    self.current_shape.change_points(p0, p1)
+                elif self.current_control == 7:
+                    self.current_shape.change_points(p0, p1)
+            self.refresh_image()
 
 
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self.current_control is not None and self.current_control in [2, 3, 4]:
+        if self.current_control is None:
+            return
+        if event.button() == Qt.MouseButton.LeftButton and self.current_control in [4, 5, 6, 7]:
             self.dragging = False
-            if self.save_draw is not None:
-                w = self.size().width() // 2
-                h = self.size().height() // 2
-                w = w - (self.screen_label.pixmap().size().width() // 2)
-                h = h - (self.screen_label.pixmap().size().height() // 2)
-                try:
-                    drawing = self.save_draw[h:h + self.screen_label.pixmap().size().height(), \
-                                             w:w + self.screen_label.pixmap().size().width()]
-                except:
-                    set_trace()
-                    return
-                if self.current_image not in self.drawn_shapes.keys():
-                    self.drawn_shapes[self.current_image] = [drawing]
-                else:
-                    drawn = self.drawn_shapes[self.current_image]
-                    drawn.append(drawing)
-                    self.drawn_shapes[self.current_image] = drawn
-                self.board_label.setPixmap(QPixmap()) 
+            if self.current_shape is not None:
+                self.current_shape.change_color((0, 0, 255))
+                self.current_shape = None
                 self.refresh_image()
+
 
 
     def resizeEvent(self, event):

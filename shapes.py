@@ -6,7 +6,7 @@ class Shape():
     def __init__(self, color):
         self.color = color
 
-    def get_color(self):
+    def get_color(self) -> tuple:
         return self.color
 
     def change_color(self, color):
@@ -15,7 +15,7 @@ class Shape():
 
 
 class Line(Shape):
-    def __init__(self, p0, p1, color = np.array([0, 255, 0]).astype(np.uint8)):
+    def __init__(self, p0, p1, color = (0, 255, 0)):
         super().__init__(color)
         self.p0 = p0
         self.p1 = p1
@@ -30,7 +30,7 @@ class Line(Shape):
 
 
 class Circle(Shape):
-    def __init__(self, p, radius, color = np.array([0, 255, 0]).astype(np.uint8)):
+    def __init__(self, p, radius, color = (0, 255, 0)):
         super().__init__(color)
         self.p = p
         self.radius = radius
@@ -45,7 +45,22 @@ class Circle(Shape):
 
 
 class Rect(Shape):
-    def __init__(self, p0, p1, color = np.array([0, 255, 0]).astype(np.uint8)):
+    def __init__(self, p0, p1, color = (0, 255, 0)):
+        super().__init__(color)
+        self.p0 = p0
+        self.p1 = p1
+
+    def get_points(self):
+        return self.p0, self.p1
+    
+    def change_points(self, p0, p1):
+        self.p0 = p0
+        self.p1 = p1
+
+
+
+class Ellipse(Shape):
+    def __init__(self, p0, p1, color = (0, 255, 0)):
         super().__init__(color)
         self.p0 = p0
         self.p1 = p1
@@ -60,7 +75,7 @@ class Rect(Shape):
 
 
 class Polygon(Shape):
-    def __init__(self, ps, color = np.array([0, 255, 0]).astype(np.uint8)):
+    def __init__(self, ps, color = (0, 255, 0)):
         super().__init__(color)
         self.ps = ps
 
