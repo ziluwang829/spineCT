@@ -27,6 +27,9 @@ class Line(Shape):
         self.p0 = p0
         self.p1 = p1
 
+    def __repr__(self):
+        l = np.linalg.norm(np.array(self.p0) - np.array(self.p1))
+        return "L: " + str(round(float(l), 5))
 
 
 class Circle(Shape):

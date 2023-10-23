@@ -164,11 +164,13 @@ class DisplayWidget(QWidget):
             self.h_save = h
             self.w_save = w
             # draw
+            p1s = []
             for s in ct_img.shapes():
                 if isinstance(s, Line):
                     p0, p1 = s.get_points()
                     img = cv2.line(img, (w // 2 + p0[0], h // 2 + p0[1]), \
                                    (w // 2 + p1[0], h // 2 + p1[1]), color = s.get_color(), thickness = 1)
+                    p1s.append((p1, s))
                 elif isinstance(s, Circle):
                     p0, r = s.get_point_radius()
                     img = cv2.circle(img, (w // 2 + p0[0], h // 2 + p0[1]), \
@@ -225,6 +227,17 @@ class DisplayWidget(QWidget):
 
             h, w, _ = img.shape
 
+            for p1 in p1s:
+                # p, s = p1
+                # p = self.adjusted_point(self.w_save // 2 + p[0], self.h_save // 2 + p[1])
+                # p = (int((self.w_save // 2 + p[0])), int((self.h_save // 2 + p[1])))
+                # img = cv2.putText(img, str(s), p, cv2.FONT_HERSHEY_SIMPLEX, 1,  
+                #    (255, 0, 0), 1, cv2.LINE_AA) 
+                p, s = p1
+                x, y = self.inverse_adjusted_point(p)
+                img = cv2.putText(img, str(s), (x, y), cv2.FONT_HERSHEY_SIMPLEX, 1,  
+                   (255, 0, 0), 1, cv2.LINE_AA) 
+
             q_image = QImage(img.tobytes(), w, h, 3 * w, QImage.Format.Format_RGB888)
             pixmap = QPixmap.fromImage(q_image)
             self.screen_label.setPixmap(pixmap)
@@ -277,6 +290,18 @@ class DisplayWidget(QWidget):
         theta = -1 * np.arctan2(p[1], p[0]) 
         p = (int((r / z) * np.cos(theta)), -1 * int((r / z) * np.sin(theta)))
         return p
+
+    def inverse_adjusted_point(self, p):
+        max_h = self.size().height()
+        max_w = self.size().width()
+        z = self.zoom_factors[self.current_image[0]][self.current_image[1]]
+        # Calculate the polar coordinates
+        r = np.sqrt(p[0] ** 2 + p[1] ** 2)
+        theta = -1 * np.arctan2(p[1], p[0])
+        # Calculate the original x and y
+        x = int((r * z) * np.cos(theta) + max_w // 2)
+        y = int((-1 * (r * z) * np.sin(theta)) + max_h // 2)
+        return x, y
 
     def find_shape(self, p):
         if self.current_image is None:
