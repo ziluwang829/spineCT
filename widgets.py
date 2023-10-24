@@ -170,7 +170,7 @@ class DisplayWidget(QWidget):
                     p0, p1 = s.get_points()
                     img = cv2.line(img, (w // 2 + p0[0], h // 2 + p0[1]), \
                                    (w // 2 + p1[0], h // 2 + p1[1]), color = s.get_color(), thickness = 1)
-                    p1s.append((p1, s))
+                    p1s.append((s.get_left(), s))
                 elif isinstance(s, Circle):
                     p0, r = s.get_point_radius()
                     img = cv2.circle(img, (w // 2 + p0[0], h // 2 + p0[1]), \
@@ -234,10 +234,19 @@ class DisplayWidget(QWidget):
                 # img = cv2.putText(img, str(s), p, cv2.FONT_HERSHEY_SIMPLEX, 1,  
                 #    (255, 0, 0), 1, cv2.LINE_AA) 
                 p, s = p1
+                print(p)
+                p, a = p
                 x, y = self.inverse_adjusted_point(p)
-                img = cv2.putText(img, str(s), (x, y), cv2.FONT_HERSHEY_SIMPLEX, 1,  
+                img2 = np.zeros_like(img)
+                img2 = cv2.putText(img2, str(s), (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5,  
                    (255, 0, 0), 1, cv2.LINE_AA) 
-
+                print(np.degrees(a))
+                M = cv2.getRotationMatrix2D((x, y), np.degrees(a) + 90, 1)
+                img2 = cv2.warpAffine(img2, M, (img2.shape[1], img2.shape[0]))
+                red_pixels_mask = (img2[:, :, 0] > 10)
+                img[red_pixels_mask, 0] = img2[red_pixels_mask, 0]
+                img[red_pixels_mask, 1] = 0
+                img[red_pixels_mask, 2] = 0
             q_image = QImage(img.tobytes(), w, h, 3 * w, QImage.Format.Format_RGB888)
             pixmap = QPixmap.fromImage(q_image)
             self.screen_label.setPixmap(pixmap)

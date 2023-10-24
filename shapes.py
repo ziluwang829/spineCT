@@ -30,7 +30,12 @@ class Line(Shape):
     def __repr__(self):
         l = np.linalg.norm(np.array(self.p0) - np.array(self.p1))
         return "L: " + str(round(float(l), 5))
-
+    
+    def get_left(self):
+        if self.p0[0] < self.p1[0]:
+            return self.p0, np.arctan2(self.p0[0] - self.p1[0], self.p0[1] - self.p1[1])
+        else:
+            return self.p1, np.arctan2(self.p1[0] - self.p0[0], self.p1[1] - self.p0[1])
 
 class Circle(Shape):
     def __init__(self, p, radius, color = (0, 255, 0)):
