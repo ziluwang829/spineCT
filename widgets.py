@@ -121,6 +121,7 @@ class DisplayWidget(QWidget):
             max_h = self.size().height()
             max_w = self.size().width()
 
+            # crop to window size
             if max_h < h:
                 if h % 2 == max_h % 2:
                     crop_top = (h - max_h) // 2
@@ -138,7 +139,7 @@ class DisplayWidget(QWidget):
                 gray_img = gray_img[:, crop_left:crop_right]
                 assert (gray_img.shape[1] == max_w)
 
-
+            # pad to window size
             pad_h = max_h - h
             pad_w = max_w - w
 
@@ -166,48 +167,18 @@ class DisplayWidget(QWidget):
             # draw
             p1s = []
             for s in ct_img.shapes():
+                if isinstance(s, Shape):
+                    img = s.draw(img, w, h)
                 if isinstance(s, Line):
-                    p0, p1 = s.get_points()
-                    img = cv2.line(img, (w // 2 + p0[0], h // 2 + p0[1]), \
-                                   (w // 2 + p1[0], h // 2 + p1[1]), color = s.get_color(), thickness = 1)
                     p1s.append((s.get_left(), s))
-                elif isinstance(s, Circle):
-                    p0, r = s.get_point_radius()
-                    img = cv2.circle(img, (w // 2 + p0[0], h // 2 + p0[1]), \
-                                   r, color = s.get_color(), thickness = 1)
-                elif isinstance(s, Rect):
-                    p0, p1 = s.get_points()
-                    img = cv2.rectangle(img, (w // 2 + p0[0], h // 2 + p0[1]), \
-                                   (w // 2 + p1[0], h // 2 + p1[1]), color = s.get_color(), thickness = 1)
-                elif isinstance(s, Ellipse):
-                    p0, p1 = s.get_points()
-                    p0 = (w // 2 + p0[0], h // 2 + p0[1])
-                    p1 = (w // 2 + p1[0], h // 2 + p1[1])
-                    p2 = (p0[0], p1[1])
-                    rr = cv2.RotatedRect(p0, p2, p1)
-                    img = cv2.ellipse(img, rr, \
-                                      color = s.get_color(), thickness = 1)
-                elif isinstance(s, Polygon):
-                    ps = s.get_points()
-                    if len(ps) == 0:
-                        pass
-                    elif len(ps) <= 2:
-                        ps = [[w // 2 + p[0], h // 2 + p[1]] for p in ps]
-                        for p in ps:
-                            img[p[1], p[0]] = [0, 255, 0]
-                    else:
-                        ps = [[w // 2 + p[0], h // 2 + p[1]] for p in ps]
-                        ps = np.array(ps)
-                        ps = ps.reshape(1, -1, 2)
-                        img = cv2.polylines(img, [ps], True, color = s.get_color(), thickness = 1)
 
-
-            # Get zoom factor, height, and width
+            # Get zoom factor, height, and width, then resize
             z = self.zoom_factors[self.current_image[0]][self.current_image[1]]
 
             img = cv2.resize(img, (int(w * z), int(h * z)))
             h, w, _ = img.shape
 
+            # crop after resize
             if max_h < h:
                 if h % 2 == max_h % 2:
                     crop_top = (h - max_h) // 2
@@ -227,12 +198,10 @@ class DisplayWidget(QWidget):
 
             h, w, _ = img.shape
 
+            # for labeling the length of the line
+            # Lines only
+            # scuffed
             for p1 in p1s:
-                # p, s = p1
-                # p = self.adjusted_point(self.w_save // 2 + p[0], self.h_save // 2 + p[1])
-                # p = (int((self.w_save // 2 + p[0])), int((self.h_save // 2 + p[1])))
-                # img = cv2.putText(img, str(s), p, cv2.FONT_HERSHEY_SIMPLEX, 1,  
-                #    (255, 0, 0), 1, cv2.LINE_AA) 
                 p, s = p1
                 print(p)
                 p, a = p
@@ -247,6 +216,7 @@ class DisplayWidget(QWidget):
                 img[red_pixels_mask, 0] = img2[red_pixels_mask, 0]
                 img[red_pixels_mask, 1] = 0
                 img[red_pixels_mask, 2] = 0
+                
             q_image = QImage(img.tobytes(), w, h, 3 * w, QImage.Format.Format_RGB888)
             pixmap = QPixmap.fromImage(q_image)
             self.screen_label.setPixmap(pixmap)
@@ -256,13 +226,14 @@ class DisplayWidget(QWidget):
         self.display_image(self.current_image[0], self.current_image[1])
         
 
+    # can only display file name for now.
     def display_info(self):
         if self.current_image is not None:
             i, j = self.current_image
             self.info_label.show()
             self.info_label.setText(str(self.ct.get_CTImage(i, j)))
 
-
+    # when buttons on top are clicked
     def change_control(self, control):
         if self.current_control == 1 and control != 1:
             self.info_label.hide()
@@ -277,7 +248,7 @@ class DisplayWidget(QWidget):
             self.refresh_image()
             self.current_control = 0
 
-
+    # zoom in/out
     def wheelEvent(self, event):
         modifiers = QApplication.keyboardModifiers()
         if modifiers == Qt.KeyboardModifier.ShiftModifier:
@@ -289,7 +260,8 @@ class DisplayWidget(QWidget):
         else:
             event.ignore()
 
-
+    # from (x,y) in plot coordinates from screen
+    # to Cartesian coordinate with (0, 0) being center of ct image
     def adjusted_point(self, x, y):
         max_h = self.size().height()
         max_w = self.size().width()
@@ -300,18 +272,19 @@ class DisplayWidget(QWidget):
         p = (int((r / z) * np.cos(theta)), -1 * int((r / z) * np.sin(theta)))
         return p
 
+    # inverse of above
+    # is the math correct? i can't confirm
     def inverse_adjusted_point(self, p):
         max_h = self.size().height()
         max_w = self.size().width()
         z = self.zoom_factors[self.current_image[0]][self.current_image[1]]
-        # Calculate the polar coordinates
         r = np.sqrt(p[0] ** 2 + p[1] ** 2)
         theta = -1 * np.arctan2(p[1], p[0])
-        # Calculate the original x and y
         x = int((r * z) * np.cos(theta) + max_w // 2)
         y = int((-1 * (r * z) * np.sin(theta)) + max_h // 2)
         return x, y
 
+    # find the Shapethat is located in p
     def find_shape(self, p):
         if self.current_image is None:
             return None
@@ -321,53 +294,11 @@ class DisplayWidget(QWidget):
             img = np.zeros((self.h_save, self.w_save, 3))
             h, w, _ = img.shape
             for s in shapes:
-                if isinstance(s, Line):
-                    p0, p1 = s.get_points()
-                    img = cv2.line(img, (w // 2 + p0[0], h // 2 + p0[1]), \
-                                   (w // 2 + p1[0], h // 2 + p1[1]), color = s.get_color(), thickness = 1)
-                    
-                    if np.sum(img[h // 2 + p[1]-3:h // 2 + p[1]+3, w // 2 + p[0]-3:w // 2 + p[0]+3]) > 0:
-                        return s
-                elif isinstance(s, Circle):
-                    p0, r = s.get_point_radius()
-                    img = cv2.circle(img, (w // 2 + p0[0], h // 2 + p0[1]), \
-                                   r, color = s.get_color(), thickness = 1)
-                    if np.sum(img[h // 2 + p[1]-3:h // 2 + p[1]+3, w // 2 + p[0]-3:w // 2 + p[0]+3]) > 0:
-                        return s
-                elif isinstance(s, Rect):
-                    p0, p1 = s.get_points()
-                    img = cv2.rectangle(img, (w // 2 + p0[0], h // 2 + p0[1]), \
-                                   (w // 2 + p1[0], h // 2 + p1[1]), color = s.get_color(), thickness = 1)
-                    if np.sum(img[h // 2 + p[1]-3:h // 2 + p[1]+3, w // 2 + p[0]-3:w // 2 + p[0]+3]) > 0:
-                        return s
-                elif isinstance(s, Ellipse):
-                    p0, p1 = s.get_points()
-                    p0 = (w // 2 + p0[0], h // 2 + p0[1])
-                    p1 = (w // 2 + p1[0], h // 2 + p1[1])
-                    p2 = (p0[0], p1[1])
-                    rr = cv2.RotatedRect(p0, p2, p1)
-                    img = cv2.ellipse(img, rr, \
-                                      color = s.get_color(), thickness = 1)
-                    if np.sum(img[h // 2 + p[1]-3:h // 2 + p[1]+3, w // 2 + p[0]-3:w // 2 + p[0]+3]) > 0:
-                        return s
-                elif isinstance(s, Polygon):
-                    ps = s.get_points()
-                    if len(ps) == 0:
-                        pass
-                    elif len(ps) <= 2:
-                        ps = [[w // 2 + p[0], h // 2 + p[1]] for p in ps]
-                        for p in ps:
-                            img[p[1], p[0]] = [0, 255, 0]
-                        return None
-                    else:
-                        ps = [[w // 2 + p[0], h // 2 + p[1]] for p in ps]
-                        ps = np.array(ps)
-                        ps = ps.reshape(1, -1, 2)
-                        img = cv2.polylines(img, [ps], True, color = s.get_color(), thickness = 1)
-                        if np.sum(img[h // 2 + p[1]-3:h // 2 + p[1]+3, w // 2 + p[0]-3:w // 2 + p[0]+3]) > 0:
-                            return s
+                if isinstance(s, Shape) and s.click(img, w, h, p):
+                    return s
             return None
 
+    # mouse press event to start drawing
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and self.current_control is not None:
             if self.current_control == 1:
@@ -400,7 +331,7 @@ class DisplayWidget(QWidget):
             self.refresh_image()
 
 
-
+    # handle drag when drawing
     def mouseMoveEvent(self, event):
         if self.current_control is None:
             return
@@ -432,7 +363,6 @@ class DisplayWidget(QWidget):
         elif self.current_control == 3 and self.dragging:
             # is a deep copy, not drawn on board
             # make adjust ment to current_shape
-
             p0 = self.adjusted_point(self.start_pos.x(), self.start_pos.y())
             p1 = self.adjusted_point(event.position().x(), event.position().y())
             p_dff = (p1[0] - p0[0], p1[1] - p0[1])
@@ -467,7 +397,7 @@ class DisplayWidget(QWidget):
                 self.current_shape.change_color((0, 255, 255))
         self.refresh_image()
 
-
+    # finish drawing, change  to blue
     def mouseReleaseEvent(self, event):
         if self.current_control is None:
             return
